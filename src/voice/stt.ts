@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { STT_BINARY } from "../config.js";
+import { registerSTT, type STTEngine } from "./registry.js";
 
 interface STTResult {
   text: string | null;
@@ -74,3 +75,19 @@ export async function listen(options?: {
     proc.on("error", reject);
   });
 }
+
+// --- Register as an engine ---
+
+class AppleSTTEngine implements STTEngine {
+  readonly name = "apple-speech";
+
+  async isAvailable(): Promise<boolean> {
+    return process.platform === "darwin" && existsSync(STT_BINARY);
+  }
+
+  listen(options?: { silence?: number; maxDuration?: number }): Promise<string | null> {
+    return listen(options);
+  }
+}
+
+registerSTT("apple-speech", () => new AppleSTTEngine());

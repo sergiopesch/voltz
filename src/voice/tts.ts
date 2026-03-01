@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { registerTTS, type TTSEngine } from "./registry.js";
 
 const SENTENCE_ENDINGS = /(?<=[.!?])\s+/;
 
@@ -118,3 +119,28 @@ export class TTS {
     });
   }
 }
+
+// --- Register as an engine ---
+
+class AppleTTSEngine implements TTSEngine {
+  readonly name = "apple-say";
+  private tts = new TTS();
+
+  async isAvailable(): Promise<boolean> {
+    return process.platform === "darwin";
+  }
+
+  feedText(chunk: string): void {
+    this.tts.feedText(chunk);
+  }
+
+  flush(): Promise<void> {
+    return this.tts.flush();
+  }
+
+  stop(): void {
+    this.tts.stopSpeaking();
+  }
+}
+
+registerTTS("apple-say", () => new AppleTTSEngine());

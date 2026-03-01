@@ -4,6 +4,11 @@ import { spawn } from "node:child_process";
 import chalk from "chalk";
 import ora from "ora";
 import { ensureVoltzDir, saveConfig, loadConfig, STT_BINARY } from "../config.js";
+import { logger } from "../logger.js";
+import { listSTTEngines, listTTSEngines } from "../voice/registry.js";
+// Trigger engine self-registration
+import "../voice/stt.js";
+import "../voice/tts.js";
 
 function ask(rl: ReturnType<typeof createInterface>, question: string): Promise<string> {
   return new Promise((resolve) => {
@@ -20,6 +25,8 @@ function runCommand(cmd: string, args: string[]): Promise<boolean> {
 }
 
 export async function setupCommand(): Promise<void> {
+  logger.info("setup", "start");
+
   const rl = createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -95,9 +102,17 @@ export async function setupCommand(): Promise<void> {
     );
   }
 
+  // 5. Show registered engines
+  const sttEngines = listSTTEngines();
+  const ttsEngines = listTTSEngines();
+  console.log(chalk.dim(`\nSTT engines: ${sttEngines.join(", ") || "none"}`));
+  console.log(chalk.dim(`TTS engines: ${ttsEngines.join(", ") || "none"}`));
+
   // Done
   console.log(chalk.bold("\nSetup complete!"));
   console.log(chalk.dim("Run 'voltz' to start voice mode.\n"));
 
+  logger.info("setup", "complete");
+  logger.flush();
   rl.close();
 }

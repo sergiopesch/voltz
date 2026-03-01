@@ -3,12 +3,19 @@ import ora from "ora";
 import { captureFrame } from "../vision/capture.js";
 import { streamQuery } from "../agent/session.js";
 import { TTS } from "../voice/tts.js";
+import { logger, setSession } from "../logger.js";
+import { SilentError } from "../errors.js";
 
 export async function lookCommand(description?: string): Promise<void> {
+  const sessionId = `look-${Date.now()}`;
+  setSession(sessionId);
+  logger.info("look", "start");
+
   const tts = new TTS();
 
   process.on("SIGINT", () => {
     tts.stopSpeaking();
+    logger.flush();
     process.exit(0);
   });
 
@@ -23,13 +30,12 @@ export async function lookCommand(description?: string): Promise<void> {
     const frame = await captureFrame();
     imageBase64 = frame.toString("base64");
     captureSpinner.succeed(chalk.dim("Frame captured"));
+    logger.info("look", "frame-captured");
   } catch (err) {
-    captureSpinner.fail(
-      chalk.red(
-        `Webcam capture failed: ${err instanceof Error ? err.message : String(err)}`
-      )
-    );
-    process.exit(1);
+    const msg = err instanceof Error ? err.message : String(err);
+    captureSpinner.fail(chalk.red(`Webcam capture failed: ${msg}`));
+    logger.error("look", "capture-failed", { error: msg });
+    throw new SilentError();
   }
 
   // Analyze
@@ -57,15 +63,16 @@ export async function lookCommand(description?: string): Promise<void> {
 
     if (firstChunk) {
       thinkSpinner.info(chalk.dim("No response"));
+      logger.warn("look", "empty-response");
     } else {
       process.stdout.write("\n");
       await tts.flush();
+      logger.info("look", "done");
     }
   } catch (err) {
-    thinkSpinner.fail(
-      chalk.red(
-        `Error: ${err instanceof Error ? err.message : String(err)}`
-      )
-    );
+    const msg = err instanceof Error ? err.message : String(err);
+    thinkSpinner.fail(chalk.red(`Error: ${msg}`));
+    logger.error("look", "query-error", { error: msg });
+    throw new SilentError();
   }
 }
