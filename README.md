@@ -46,6 +46,14 @@ voltz (TypeScript CLI — orchestrator)
 
 Single process, no Docker, no cloud services beyond the Anthropic API.
 
+### Reliability
+
+- **Retry with backoff** — 3 attempts with exponential delay (2s/4s), 45s budget cap
+- **Provider fallback** — Agent SDK fails → direct Anthropic API → error
+- **Rate limiting** — per-hour and per-day caps prevent runaway costs
+- **Secret redaction** — API keys and tokens are redacted in logs
+- **Agent tools** — Bash, Read, Glob, Grep, WebSearch, WebFetch for real problem-solving
+
 ### Voice State Machine
 
 The voice loop is driven by a pure-function state machine — no ad-hoc state mutations. Phases, events, and transitions are declared; actions are returned as data and dispatched by the command. This makes the core loop testable and predictable.
@@ -83,6 +91,8 @@ Settings live in `~/.voltz/config.json`. Personal overrides go in `~/.voltz/conf
 | `silenceTimeout` | `1.5` | Seconds of silence before STT stops |
 | `maxDuration` | `30` | Max recording duration in seconds |
 | `logLevel` | `info` | Log level: `debug`, `info`, `warn`, `error` |
+| `maxPerHour` | `60` | Rate limit: max queries per hour |
+| `maxPerDay` | `500` | Rate limit: max queries per day |
 | `systemPromptAppend` | — | Custom text appended to the system prompt |
 
 ## Debugging
@@ -113,6 +123,7 @@ git clone https://github.com/sergiopesch/voltz.git
 cd voltz
 npm install
 npm run build
+npm test     # Run tests
 npm run dev  # Run with hot reload (tsx)
 ```
 
@@ -130,8 +141,10 @@ voltz/
 │   │   ├── chat.ts                 # Text chat with streaming
 │   │   ├── look.ts                 # Webcam + vision analysis
 │   │   └── setup.ts               # First-time configuration wizard
+│   ├── rate-limit.ts               # Per-hour/per-day rate limiter
 │   ├── agent/
-│   │   ├── session.ts              # Claude Agent SDK streaming wrapper
+│   │   ├── session.ts              # Agent SDK with retry, rate limiting, fallback
+│   │   ├── providers.ts            # Direct Anthropic + OpenAI-compatible fallback
 │   │   └── system-prompt.ts        # Electronics companion persona
 │   ├── voice/
 │   │   ├── state-machine.ts        # Pure-function state machine

@@ -79,8 +79,50 @@ function scheduleFlush(): void {
   }, FLUSH_INTERVAL_MS);
 }
 
+// --- Secret redaction ---
+
+const SENSITIVE_PATTERNS = [
+  /api[_-]?key/i,
+  /token/i,
+  /secret/i,
+  /password/i,
+  /passwd/i,
+  /auth/i,
+  /credential/i,
+  /^key$/i,
+];
+
+function isSensitiveKey(key: string): boolean {
+  return SENSITIVE_PATTERNS.some((p) => p.test(key));
+}
+
+function redactValue(value: unknown): unknown {
+  if (typeof value === "string" && value.length > 8) {
+    return value.slice(0, 4) + "***" + value.slice(-2);
+  }
+  return "***";
+}
+
+function redactEntry(obj: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (isSensitiveKey(key)) {
+      result[key] = redactValue(value);
+    } else if (typeof value === "string" && /^sk-[a-zA-Z0-9]{10,}/.test(value)) {
+      // Catch API keys passed as values (not just sensitive-named keys)
+      result[key] = value.slice(0, 6) + "***";
+    } else if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+      result[key] = redactEntry(value as Record<string, unknown>);
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
 function write(entry: LogEntry): void {
-  buffer.push(JSON.stringify(entry) + "\n");
+  const redacted = redactEntry(entry as Record<string, unknown>);
+  buffer.push(JSON.stringify(redacted) + "\n");
   if (buffer.length >= BUFFER_MAX) {
     flushBuffer();
   } else {

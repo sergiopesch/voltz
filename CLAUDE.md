@@ -44,8 +44,11 @@ Available settings: `apiKey`, `sttEngine`, `ttsEngine`, `ttsVoice`, `silenceTime
 | `src/commands/chat.ts` | Text-only fallback with streaming |
 | `src/commands/look.ts` | Webcam capture + vision analysis |
 | `src/commands/setup.ts` | API key, mic/speaker/ffmpeg checks |
-| `src/agent/session.ts` | Claude Agent SDK streaming wrapper |
+| `src/agent/session.ts` | Claude Agent SDK with retry, rate limiting, fallback |
+| `src/agent/providers.ts` | Direct Anthropic + OpenAI-compatible fallback |
 | `src/agent/system-prompt.ts` | Electronics companion persona |
+| `src/rate-limit.ts` | Per-hour/per-day rate limiter with persistence |
+| `src/__tests__/state-machine.test.ts` | 28 tests for the voice state machine |
 | `src/voice/state-machine.ts` | Pure-function state machine (phases, events, actions) |
 | `src/voice/registry.ts` | Plugin registry for STT/TTS engines |
 | `src/voice/stt.ts` | Apple Speech STT engine |
@@ -61,14 +64,20 @@ Available settings: `apiKey`, `sttEngine`, `ttsEngine`, `ttsVoice`, `silenceTime
 - **State machine** — voice loop transitions are pure functions; actions are data, not side effects
 - **Engine registry** — self-registering plugins with auto-detect for STT/TTS
 - **SilentError** — commands print user-friendly errors, then throw SilentError so the CLI exits without duplicate output
-- **Structured logging** — JSON logs to `~/.voltz/logs/voltz.log` with session context, component tags, buffered writes, log rotation
+- **Structured logging** — JSON logs to `~/.voltz/logs/voltz.log` with session context, component tags, buffered writes, log rotation, secret redaction
 - **Two-tier config** — base config + local overrides, field-by-field merge
+- **Retry with backoff** — 3 attempts, exponential delay (2s/4s), 45s budget cap, direct API fallback
+- **Rate limiting** — per-hour (60) and per-day (500) counters persisted to `~/.voltz/rate-limit.json`
+- **Agent tools** — Bash, Read, Glob, Grep, WebSearch, WebFetch available to the agent
+- **Provider fallback** — Agent SDK → direct Anthropic API → error; OpenAI-compatible provider available
 
 ## Development
 
 ```bash
 npm run dev          # Run with tsx
 npm run build        # Compile TypeScript
+npm test             # Run tests (vitest)
+npm run test:watch   # Tests in watch mode
 npm run postinstall  # Rebuild Swift binary
 ```
 
