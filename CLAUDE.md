@@ -8,68 +8,78 @@ Single TypeScript CLI orchestrating native macOS components:
 - **Swift binary** — mic → SFSpeechRecognizer → text (STT)
 - **`say` command** — text → macOS native TTS → speaker
 - **ffmpeg** — webcam frame capture for vision
-- **Claude Agent SDK** — LLM brain with streaming
+- **Claude Agent SDK** — LLM brain with tools, retry, and fallback
+- **Direct Anthropic API** — multimodal vision (image + text), streaming
 
 ### Voice State Machine
 
-The voice loop is driven by a pure-function state machine (`src/voice/state-machine.ts`). It declares phases, events, and transitions — actions are returned as data and dispatched by the voice command. This keeps the machine testable and side-effect-free.
+The voice loop is a pure-function state machine (`src/voice/state-machine.ts`). Transitions produce actions as data, dispatched by the voice command via an iterative event queue.
 
 ```
 IDLE → LISTENING → THINKING → SPEAKING → LISTENING (loop)
-                 ↘ CAPTURING → THINKING    (webcam path)
+                 ↘ CAPTURING → THINKING  (webcam path)
 ```
 
 Phases: `IDLE`, `LISTENING`, `CAPTURING`, `THINKING`, `SPEAKING`, `ERROR`, `ENDED`
 
 ### Engine Registry
 
-STT and TTS engines self-register via `src/voice/registry.ts`. Default engines:
-- `apple-speech` — SFSpeechRecognizer (STT)
-- `apple-say` — macOS `say` command (TTS)
+STT and TTS engines self-register via `src/voice/registry.ts`. Commands use registry functions (`getSTTEngine`, `getTTSEngine`, `detectSTT`, `detectTTS`) — never direct imports. Side-effect imports at the top of commands trigger registration.
 
-To add engines (Whisper, Deepgram, ElevenLabs), implement `STTEngine` or `TTSEngine` interface and call `registerSTT()`/`registerTTS()`.
+Default engines: `apple-speech` (STT), `apple-say` (TTS).
 
-### Two-Tier Config
+### Config
 
-Settings load from `~/.voltz/config.json` with field-by-field overrides from `~/.voltz/config.local.json`. Use `config.local.json` for personal preferences that shouldn't be shared.
+Settings load from `~/.voltz/config.json` with field-by-field overrides from `~/.voltz/config.local.json`. Validated with zod (`VoltzConfigSchema`), cached in memory.
 
-Available settings: `apiKey`, `sttEngine`, `ttsEngine`, `ttsVoice`, `silenceTimeout`, `maxDuration`, `logLevel`, `systemPromptAppend`.
+Settings: `apiKey`, `model`, `sttEngine`, `ttsEngine`, `ttsVoice`, `silenceTimeout`, `maxDuration`, `logLevel`, `maxPerHour`, `maxPerDay`, `dangerousTools`, `systemPromptAppend`.
+
+### Security
+
+- Agent is sandboxed — read-only tools by default (Read, Glob, Grep, WebSearch, WebFetch). Bash requires `dangerousTools: true`.
+- Config/session/rate-limit files written `0600`. `~/.voltz/` dir `0700`. Helper: `writePrivateFile()`.
+- All child processes have `AbortSignal.timeout()`: STT 60s, TTS 30s, ffmpeg 15s.
+- API keys redacted in structured logs.
+
+### Vision
+
+Vision queries route directly to `streamAnthropicDirect` with multimodal content blocks (`ImageBlockParam` + text), bypassing the Agent SDK.
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `src/index.ts` | CLI entry (Commander.js) + SilentError handling |
-| `src/commands/voice.ts` | Voice loop — dispatches state machine actions |
-| `src/commands/chat.ts` | Text-only fallback with streaming |
-| `src/commands/look.ts` | Webcam capture + vision analysis |
-| `src/commands/setup.ts` | API key, mic/speaker/ffmpeg checks |
-| `src/agent/session.ts` | Claude Agent SDK with retry, rate limiting, fallback |
-| `src/agent/providers.ts` | Direct Anthropic + OpenAI-compatible fallback |
+| `src/index.ts` | CLI entry, global flags, update notifier |
+| `src/commands/voice.ts` | Voice loop — state machine dispatcher |
+| `src/commands/chat.ts` | Text chat with streaming |
+| `src/commands/look.ts` | Webcam capture + vision |
+| `src/commands/setup.ts` | First-time configuration |
+| `src/commands/doctor.ts` | Diagnostic checks |
+| `src/commands/completions.ts` | Shell completions (bash/zsh/fish) |
+| `src/agent/session.ts` | Agent SDK, retry, rate limiting, sandbox |
+| `src/agent/providers.ts` | Direct Anthropic API (multimodal) |
 | `src/agent/system-prompt.ts` | Electronics companion persona |
-| `src/rate-limit.ts` | Per-hour/per-day rate limiter with persistence |
-| `src/__tests__/state-machine.test.ts` | 28 tests for the voice state machine |
-| `src/voice/state-machine.ts` | Pure-function state machine (phases, events, actions) |
-| `src/voice/registry.ts` | Plugin registry for STT/TTS engines |
+| `src/rate-limit.ts` | Per-hour/per-day rate limiter |
+| `src/config.ts` | Two-tier config, zod validation, caching |
+| `src/logger.ts` | Structured JSON logger |
+| `src/errors.ts` | SilentError for clean CLI exits |
+| `src/voice/state-machine.ts` | Pure-function state machine |
+| `src/voice/registry.ts` | STT/TTS engine registry |
 | `src/voice/stt.ts` | Apple Speech STT engine |
-| `src/voice/tts.ts` | Apple `say` TTS engine with sentence buffering |
-| `src/vision/capture.ts` | ffmpeg single frame capture |
-| `src/config.ts` | Two-tier config (config.json + config.local.json) |
-| `src/logger.ts` | Structured JSON logger with buffered I/O |
-| `src/errors.ts` | SilentError for clean CLI error handling |
-| `knowledge/electronics.md` | Component database (16 components) |
+| `src/voice/tts.ts` | Apple `say` TTS engine |
+| `src/vision/capture.ts` | ffmpeg frame capture |
+| `knowledge/electronics.md` | Component database |
 
 ## Patterns
 
-- **State machine** — voice loop transitions are pure functions; actions are data, not side effects
-- **Engine registry** — self-registering plugins with auto-detect for STT/TTS
-- **SilentError** — commands print user-friendly errors, then throw SilentError so the CLI exits without duplicate output
-- **Structured logging** — JSON logs to `~/.voltz/logs/voltz.log` with session context, component tags, buffered writes, log rotation, secret redaction
-- **Two-tier config** — base config + local overrides, field-by-field merge
-- **Retry with backoff** — 3 attempts, exponential delay (2s/4s), 45s budget cap, direct API fallback
-- **Rate limiting** — per-hour (60) and per-day (500) counters persisted to `~/.voltz/rate-limit.json`
-- **Agent tools** — Bash, Read, Glob, Grep, WebSearch, WebFetch available to the agent
-- **Provider fallback** — Agent SDK → direct Anthropic API → error; OpenAI-compatible provider available
+- **State machine** — voice transitions are pure functions; actions are data, not side effects
+- **Engine registry** — self-registering plugins with auto-detect
+- **SilentError** — print user-friendly error, throw SilentError for clean exit
+- **Two-tier config** — base + local overrides, zod validation, in-memory cache
+- **Structured logging** — JSON logs with session context, secret redaction, `0600` perms
+- **Retry with backoff** — 3 attempts, exponential delay, 45s budget, direct API fallback
+- **Rate limiting** — per-hour and per-day counters with async persistence
+- **Agent sandbox** — read-only tools by default; Bash opt-in
 
 ## Development
 
@@ -83,12 +93,10 @@ npm run postinstall  # Rebuild Swift binary
 
 ## Debugging
 
-Logs are written to `~/.voltz/logs/voltz.log` as JSON. Set `logLevel` to `"debug"` in config for verbose output:
-
 ```bash
-# View live logs
+voltz --verbose                   # debug-level logs
 tail -f ~/.voltz/logs/voltz.log | jq .
-
-# Filter by component
 tail -f ~/.voltz/logs/voltz.log | jq 'select(.component == "voice")'
 ```
+
+`voltz doctor` — full diagnostic check of API key, STT, TTS, ffmpeg, config, and rate limits.

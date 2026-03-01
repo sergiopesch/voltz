@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { registerTTS, type TTSEngine } from "./registry.js";
+import { loadConfig } from "../config.js";
 
 const SENTENCE_ENDINGS = /(?<=[.!?])\s+/;
 
@@ -34,6 +35,12 @@ export class TTS {
   private currentProcess: ChildProcess | null = null;
   private speaking = false;
   private queue: string[] = [];
+  private voice: string;
+  private flushResolve: (() => void) | null = null;
+
+  constructor(voice = "Samantha") {
+    this.voice = voice;
+  }
 
   feedText(chunk: string): void {
     this.buffer += chunk;
@@ -57,26 +64,20 @@ export class TTS {
     }
   }
 
-  async flush(): Promise<void> {
+  flush(): Promise<void> {
     const remaining = this.buffer.trim();
     this.buffer = "";
     if (remaining) {
       this.queue.push(remaining);
-      if (!this.speaking) {
-        this.speakNext();
-      }
     }
-
-    // Wait for all speech to finish
+    if (!this.speaking && this.queue.length === 0) {
+      return Promise.resolve();
+    }
+    if (!this.speaking) {
+      this.speakNext();
+    }
     return new Promise((resolve) => {
-      const check = () => {
-        if (!this.speaking && this.queue.length === 0) {
-          resolve();
-        } else {
-          setTimeout(check, 100);
-        }
-      };
-      check();
+      this.flushResolve = resolve;
     });
   }
 
@@ -88,12 +89,16 @@ export class TTS {
       this.currentProcess = null;
     }
     this.speaking = false;
+    this.flushResolve?.();
+    this.flushResolve = null;
   }
 
   private speakNext(): void {
     const text = this.queue.shift();
     if (!text) {
       this.speaking = false;
+      this.flushResolve?.();
+      this.flushResolve = null;
       return;
     }
 
@@ -104,8 +109,9 @@ export class TTS {
       return;
     }
 
-    this.currentProcess = spawn("say", ["-v", "Samantha", cleaned], {
+    this.currentProcess = spawn("say", ["-v", this.voice, cleaned], {
       stdio: "ignore",
+      signal: AbortSignal.timeout(30_000),
     });
 
     this.currentProcess.on("close", () => {
@@ -124,7 +130,12 @@ export class TTS {
 
 class AppleTTSEngine implements TTSEngine {
   readonly name = "apple-say";
-  private tts = new TTS();
+  private tts: TTS;
+
+  constructor() {
+    const config = loadConfig();
+    this.tts = new TTS(config?.ttsVoice ?? "Samantha");
+  }
 
   async isAvailable(): Promise<boolean> {
     return process.platform === "darwin";

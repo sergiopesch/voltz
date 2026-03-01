@@ -1,7 +1,9 @@
 import chalk from "chalk";
 import ora, { type Ora } from "ora";
-import { listen } from "../voice/stt.js";
-import { TTS } from "../voice/tts.js";
+// Trigger engine self-registration via side-effect imports
+import "../voice/stt.js";
+import "../voice/tts.js";
+import { getSTTEngine, getTTSEngine, detectSTT, detectTTS, type STTEngine, type TTSEngine } from "../voice/registry.js";
 import { streamQuery } from "../agent/session.js";
 import { captureFrame } from "../vision/capture.js";
 import { logger, setSession } from "../logger.js";
@@ -18,7 +20,25 @@ import {
 
 export async function voiceCommand(): Promise<void> {
   const config = loadConfig();
-  const tts = new TTS();
+
+  // Resolve STT engine from config or auto-detect
+  const sttEngine: STTEngine =
+    (config?.sttEngine ? getSTTEngine(config.sttEngine) : null) ??
+    (await detectSTT()) ??
+    (() => {
+      console.log(chalk.red("No STT engine available. Run: voltz setup"));
+      throw new SilentError();
+    })();
+
+  // Resolve TTS engine from config or auto-detect
+  const ttsEngine: TTSEngine =
+    (config?.ttsEngine ? getTTSEngine(config.ttsEngine) : null) ??
+    (await detectTTS()) ??
+    (() => {
+      console.log(chalk.red("No TTS engine available. Run: voltz setup"));
+      throw new SilentError();
+    })();
+
   let phase: Phase = "IDLE";
   let ctx = initialContext();
   let spinner: Ora | null = null;
@@ -40,7 +60,7 @@ export async function voiceCommand(): Promise<void> {
         }).start();
 
         try {
-          const transcript = await listen({
+          const transcript = await sttEngine.listen({
             silence: config?.silenceTimeout ?? 1.5,
             maxDuration: config?.maxDuration ?? 30,
           });
@@ -102,7 +122,11 @@ export async function voiceCommand(): Promise<void> {
         }).start();
 
         // Run the query as a separate async flow — dispatch events back
-        queryLoop(action.transcript, action.imageBase64).catch(() => {});
+        queryLoop(action.transcript, action.imageBase64).catch((err) => {
+          logger.error("voice", "query-loop-unhandled", {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
         return null; // events come from queryLoop
       }
 
@@ -112,16 +136,16 @@ export async function voiceCommand(): Promise<void> {
           spinner = null;
         }
         process.stdout.write(chalk.green(action.text));
-        tts.feedText(action.text);
+        ttsEngine.feedText(action.text);
         return null;
 
       case "FLUSH_TTS":
         process.stdout.write("\n\n");
-        await tts.flush();
+        await ttsEngine.flush();
         return { type: "SPEECH_FINISHED" };
 
       case "STOP_TTS":
-        tts.stopSpeaking();
+        ttsEngine.stop();
         return null;
 
       case "SHOW_ERROR":
@@ -143,17 +167,21 @@ export async function voiceCommand(): Promise<void> {
     }
   }
 
-  // --- Process an event through the state machine ---
+  // --- Process an event through the state machine (iterative queue) ---
 
-  async function processEvent(event: Event): Promise<void> {
-    const result = transition(phase, event, ctx);
-    phase = result.phase;
-    ctx = result.context;
+  async function processEvent(initialEvent: Event): Promise<void> {
+    const queue: Event[] = [initialEvent];
+    while (queue.length > 0) {
+      const event = queue.shift()!;
+      const result = transition(phase, event, ctx);
+      phase = result.phase;
+      ctx = result.context;
 
-    for (const action of result.actions) {
-      const nextEvent = await dispatch(action);
-      if (nextEvent) {
-        await processEvent(nextEvent);
+      for (const action of result.actions) {
+        const nextEvent = await dispatch(action);
+        if (nextEvent) {
+          queue.push(nextEvent);
+        }
       }
     }
   }
@@ -181,7 +209,7 @@ export async function voiceCommand(): Promise<void> {
 
   process.on("SIGINT", () => {
     logger.info("voice", "sigint");
-    tts.stopSpeaking();
+    ttsEngine.stop();
     spinner?.stop();
     logger.flush();
     console.log(chalk.dim("\nGoodbye!"));
@@ -196,7 +224,7 @@ export async function voiceCommand(): Promise<void> {
   await processEvent({ type: "START" });
 
   // The state machine drives itself via action → event feedback loops.
-  // processEvent is recursive — it keeps running until phase is ENDED
+  // processEvent uses an iterative queue — it keeps running until phase is ENDED
   // or the process is interrupted.
 
   if ((phase as Phase) === "ENDED") {

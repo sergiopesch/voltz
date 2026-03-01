@@ -1,5 +1,5 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { loadSessionId, saveSessionId } from "../config.js";
+import { loadSessionId, saveSessionId, loadConfig } from "../config.js";
 import { getSystemPrompt } from "./system-prompt.js";
 import { logger } from "../logger.js";
 import { checkRateLimit } from "../rate-limit.js";
@@ -35,14 +35,14 @@ async function sleep(ms: number): Promise<void> {
 
 // --- Agent SDK tools ---
 
-const ALLOWED_TOOLS = [
-  "Bash",
-  "Read",
-  "Glob",
-  "Grep",
-  "WebSearch",
-  "WebFetch",
-];
+function getAllowedTools(): string[] {
+  const tools = ["Read", "Glob", "Grep", "WebSearch", "WebFetch"];
+  const config = loadConfig();
+  if (config?.dangerousTools) {
+    tools.unshift("Bash");
+  }
+  return tools;
+}
 
 // --- Main streaming query ---
 
@@ -53,7 +53,7 @@ export async function* streamQuery(
   { type: "text"; text: string } | { type: "done"; sessionId: string }
 > {
   // Rate limit check
-  const rateCheck = checkRateLimit();
+  const rateCheck = await checkRateLimit();
   if (!rateCheck.allowed) {
     yield { type: "text", text: rateCheck.reason ?? "Rate limit exceeded." };
     yield { type: "done", sessionId: "" };
@@ -67,6 +67,24 @@ export async function* streamQuery(
       prompt || "What do you see? Describe the components and any issues.";
   } else {
     fullPrompt = prompt;
+  }
+
+  // Vision queries go directly to Anthropic API (Agent SDK doesn't support images)
+  if (options?.imageBase64) {
+    logger.info("session", "vision-direct-api", { promptLength: fullPrompt.length });
+    try {
+      for await (const chunk of streamAnthropicDirect(fullPrompt, { imageBase64: options.imageBase64 })) {
+        if (chunk.type === "text") {
+          yield { type: "text", text: chunk.text };
+        }
+      }
+      yield { type: "done", sessionId: previousSessionId ?? "" };
+      return;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error("session", "vision-failed", { error: msg });
+      throw err;
+    }
   }
 
   let sessionId = previousSessionId ?? undefined;
@@ -99,7 +117,7 @@ export async function* streamQuery(
         options: {
           systemPrompt: getSystemPrompt(),
           resume: sessionId,
-          allowedTools: ALLOWED_TOOLS,
+          allowedTools: getAllowedTools(),
           permissionMode: "bypassPermissions" as const,
           allowDangerouslySkipPermissions: true,
         },

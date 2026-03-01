@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+  <!-- Circle background -->
+  <circle cx="64" cy="64" r="64" fill="#0A0A0A"/>
+  <circle cx="64" cy="64" r="60" fill="none" stroke="#E60000" stroke-width="3"/>
+
+  <!-- Lightning bolt -->
+  <g transform="translate(34, 14)">
+    <!-- Shadow -->
+    <polygon points="32,0 14,42 28,42 18,100 56,36 38,36 50,0"
+             fill="#CC0000" opacity="0.3" transform="translate(2,2)"/>
+    <!-- Main bolt -->
+    <polygon points="32,0 14,42 28,42 18,100 56,36 38,36 50,0"
+             fill="#E60000"/>
+    <!-- Top highlight -->
+    <polygon points="32,0 24,20 38,20 50,0"
+             fill="#FF3333" opacity="0.6"/>
+    <!-- Bottom shine -->
+    <polygon points="28,42 23,56 31,56 18,100 38,58 30,58 32,42"
+             fill="#FF1A1A" opacity="0.4"/>
+  </g>
+</svg>

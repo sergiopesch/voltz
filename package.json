@@ -1,8 +1,16 @@
 {
   "name": "voltz",
   "version": "0.1.0",
-  "description": "Voice-first AI companion for electronics enthusiasts",
+  "description": "Voice-first AI companion for electronics enthusiasts. Speak questions, get spoken answers.",
   "type": "module",
+  "homepage": "https://github.com/sergiopesch/voltz",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sergiopesch/voltz.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sergiopesch/voltz/issues"
+  },
   "bin": {
     "voltz": "./dist/index.js"
   },
@@ -24,7 +32,12 @@
     "ai",
     "claude",
     "robotics",
-    "iot"
+    "iot",
+    "cli",
+    "speech",
+    "tts",
+    "stt",
+    "vision"
   ],
   "author": "sergiopesch",
   "license": "MIT",
@@ -33,7 +46,9 @@
     "@anthropic-ai/sdk": "^0.78.0",
     "chalk": "^5.4.1",
     "commander": "^13.1.0",
-    "ora": "^8.2.0"
+    "ora": "^8.2.0",
+    "simple-update-notifier": "^2.0.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/node": "^22.13.0",

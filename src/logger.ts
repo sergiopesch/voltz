@@ -1,10 +1,10 @@
 import {
   appendFileSync,
+  chmodSync,
   existsSync,
   mkdirSync,
   renameSync,
   statSync,
-  writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
 import { VOLTZ_DIR, ensureVoltzDir } from "./config.js";
@@ -65,6 +65,7 @@ function flushBuffer(): void {
     ensureLogDir();
     rotateIfNeeded();
     appendFileSync(LOG_FILE, buffer.join(""));
+    try { chmodSync(LOG_FILE, 0o600); } catch { /* ignore */ }
     buffer = [];
   } catch {
     buffer = []; // drop rather than leak memory

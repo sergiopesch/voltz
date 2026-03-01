@@ -2,8 +2,11 @@ import chalk from "chalk";
 import ora from "ora";
 import { captureFrame } from "../vision/capture.js";
 import { streamQuery } from "../agent/session.js";
-import { TTS } from "../voice/tts.js";
+// Trigger engine self-registration
+import "../voice/tts.js";
+import { getTTSEngine, detectTTS, type TTSEngine } from "../voice/registry.js";
 import { logger, setSession } from "../logger.js";
+import { loadConfig } from "../config.js";
 import { SilentError } from "../errors.js";
 
 export async function lookCommand(description?: string): Promise<void> {
@@ -11,10 +14,19 @@ export async function lookCommand(description?: string): Promise<void> {
   setSession(sessionId);
   logger.info("look", "start");
 
-  const tts = new TTS();
+  const config = loadConfig();
+
+  // Resolve TTS engine from config or auto-detect
+  const ttsEngine: TTSEngine =
+    (config?.ttsEngine ? getTTSEngine(config.ttsEngine) : null) ??
+    (await detectTTS()) ??
+    (() => {
+      console.log(chalk.red("No TTS engine available. Run: voltz setup"));
+      throw new SilentError();
+    })();
 
   process.on("SIGINT", () => {
-    tts.stopSpeaking();
+    ttsEngine.stop();
     logger.flush();
     process.exit(0);
   });
@@ -57,7 +69,7 @@ export async function lookCommand(description?: string): Promise<void> {
           firstChunk = false;
         }
         process.stdout.write(chalk.green(chunk.text));
-        tts.feedText(chunk.text);
+        ttsEngine.feedText(chunk.text);
       }
     }
 
@@ -66,7 +78,7 @@ export async function lookCommand(description?: string): Promise<void> {
       logger.warn("look", "empty-response");
     } else {
       process.stdout.write("\n");
-      await tts.flush();
+      await ttsEngine.flush();
       logger.info("look", "done");
     }
   } catch (err) {

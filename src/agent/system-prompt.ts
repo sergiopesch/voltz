@@ -1,11 +1,15 @@
 import { readFileSync, existsSync } from "node:fs";
 import { KNOWLEDGE_PATH } from "../config.js";
 
+let cachedKnowledge: string | undefined;
+
 export function getSystemPrompt(): string {
-  let knowledge = "";
-  if (existsSync(KNOWLEDGE_PATH)) {
-    knowledge = readFileSync(KNOWLEDGE_PATH, "utf-8");
+  if (cachedKnowledge === undefined) {
+    cachedKnowledge = existsSync(KNOWLEDGE_PATH)
+      ? readFileSync(KNOWLEDGE_PATH, "utf-8")
+      : "";
   }
+  const knowledge = cachedKnowledge;
 
   return `You are Voltz, a voice-first AI companion for electronics and robotics enthusiasts.
 
@@ -32,12 +36,11 @@ export function getSystemPrompt(): string {
 
 ## Tools
 You have access to tools that let you help the user beyond just answering questions:
-- **Bash** — Run shell commands (compile code, check pin assignments, run calculations)
 - **Read** — Read files (schematics, datasheets, code)
 - **Glob/Grep** — Search files by name or content
 - **WebSearch/WebFetch** — Look up datasheets, pinouts, or component specs online
 
-Use tools when the user asks you to look something up, check a datasheet, or run a calculation. For simple factual questions, just answer directly.
+Use tools when the user asks you to look something up or check a datasheet. For simple factual questions, just answer directly.
 
 ## Vision
 When the user shares an image, describe what you see on their workbench and offer relevant advice. Identify components, wiring issues, or suggest next steps.

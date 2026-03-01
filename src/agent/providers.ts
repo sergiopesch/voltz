@@ -13,21 +13,37 @@ export type StreamChunk =
  * No tools, no session management — just streaming text.
  */
 export async function* streamAnthropicDirect(
-  prompt: string
+  prompt: string,
+  options?: { imageBase64?: string }
 ): AsyncGenerator<StreamChunk> {
   const apiKey = getApiKey();
   const config = loadConfig();
-  const model = (config as Record<string, unknown> | null)?.model as string | undefined ?? "claude-sonnet-4-5-20250514";
+  const model = config?.model ?? "claude-sonnet-4-5-20250514";
 
   const client = new Anthropic({ apiKey });
 
-  logger.info("provider", "anthropic-direct-start", { model });
+  logger.info("provider", "anthropic-direct-start", { model, hasImage: !!options?.imageBase64 });
+
+  const userContent: Anthropic.MessageCreateParams["messages"][0]["content"] =
+    options?.imageBase64
+      ? [
+          {
+            type: "image" as const,
+            source: {
+              type: "base64" as const,
+              media_type: "image/jpeg" as const,
+              data: options.imageBase64,
+            },
+          },
+          { type: "text" as const, text: prompt },
+        ]
+      : prompt;
 
   const stream = client.messages.stream({
     model,
     max_tokens: 1024,
     system: getSystemPrompt(),
-    messages: [{ role: "user", content: prompt }],
+    messages: [{ role: "user", content: userContent }],
   });
 
   for await (const event of stream) {

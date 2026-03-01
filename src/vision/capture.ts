@@ -21,7 +21,7 @@ export async function captureFrame(): Promise<Buffer> {
         "-y",
         outputPath,
       ],
-      { stdio: ["ignore", "pipe", "pipe"] }
+      { stdio: ["ignore", "pipe", "pipe"], signal: AbortSignal.timeout(15_000) }
     );
 
     let stderr = "";

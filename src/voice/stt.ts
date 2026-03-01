@@ -31,8 +31,12 @@ export async function listen(options?: {
   if (options?.maxDuration)
     args.push("--max-duration", String(options.maxDuration));
 
+  const timeoutMs = ((options?.maxDuration ?? 30) + 30) * 1000; // maxDuration + 30s buffer
   return new Promise((resolve, reject) => {
-    const proc = spawn(STT_BINARY, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const proc = spawn(STT_BINARY, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      signal: AbortSignal.timeout(timeoutMs),
+    });
 
     let stdout = "";
     let stderr = "";

@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { readFile, writeFile, chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { VOLTZ_DIR, ensureVoltzDir, loadConfig } from "./config.js";
 import { logger } from "./logger.js";
@@ -15,12 +16,13 @@ const DEFAULTS = {
   maxPerDay: 500,
 };
 
-function load(): RateData {
+async function load(): Promise<RateData> {
   if (!existsSync(RATE_FILE)) {
     return freshData();
   }
   try {
-    return JSON.parse(readFileSync(RATE_FILE, "utf-8"));
+    const data = await readFile(RATE_FILE, "utf-8");
+    return JSON.parse(data);
   } catch {
     return freshData();
   }
@@ -34,9 +36,11 @@ function freshData(): RateData {
   };
 }
 
-function save(data: RateData): void {
+async function save(data: RateData): Promise<void> {
   ensureVoltzDir();
-  writeFileSync(RATE_FILE, JSON.stringify(data, null, 2) + "\n");
+  const content = JSON.stringify(data, null, 2) + "\n";
+  await writeFile(RATE_FILE, content);
+  await chmod(RATE_FILE, 0o600);
 }
 
 export interface RateLimitResult {
@@ -50,12 +54,12 @@ export interface RateLimitResult {
  * Check and consume a rate limit token.
  * Returns allowed: true if under limits, false with reason if exceeded.
  */
-export function checkRateLimit(): RateLimitResult {
+export async function checkRateLimit(): Promise<RateLimitResult> {
   const config = loadConfig();
-  const maxHour = (config as Record<string, unknown> | null)?.maxPerHour as number | undefined ?? DEFAULTS.maxPerHour;
-  const maxDay = (config as Record<string, unknown> | null)?.maxPerDay as number | undefined ?? DEFAULTS.maxPerDay;
+  const maxHour = config?.maxPerHour ?? DEFAULTS.maxPerHour;
+  const maxDay = config?.maxPerDay ?? DEFAULTS.maxPerDay;
 
-  const data = load();
+  const data = await load();
   const now = Date.now();
 
   // Reset expired windows
@@ -74,7 +78,7 @@ export function checkRateLimit(): RateLimitResult {
     const resetIn = Math.ceil((data.hourly.resetAt - now) / 60_000);
     const reason = `Hourly limit reached (${maxHour}/hour). Resets in ${resetIn} minutes.`;
     logger.warn("rate-limit", "hourly-exceeded", { count: data.hourly.count, max: maxHour });
-    save(data);
+    await save(data);
     return { allowed: false, reason, hourlyRemaining: 0, dailyRemaining };
   }
 
@@ -82,14 +86,14 @@ export function checkRateLimit(): RateLimitResult {
     const resetIn = Math.ceil((data.daily.resetAt - now) / 3600_000);
     const reason = `Daily limit reached (${maxDay}/day). Resets in ${resetIn} hours.`;
     logger.warn("rate-limit", "daily-exceeded", { count: data.daily.count, max: maxDay });
-    save(data);
+    await save(data);
     return { allowed: false, reason, hourlyRemaining, dailyRemaining: 0 };
   }
 
   // Consume token
   data.hourly.count++;
   data.daily.count++;
-  save(data);
+  await save(data);
 
   return {
     allowed: true,
@@ -99,11 +103,11 @@ export function checkRateLimit(): RateLimitResult {
 }
 
 /** Get current usage without consuming a token */
-export function getRateLimitStatus(): { hourly: number; daily: number; maxHour: number; maxDay: number } {
+export async function getRateLimitStatus(): Promise<{ hourly: number; daily: number; maxHour: number; maxDay: number }> {
   const config = loadConfig();
-  const maxHour = (config as Record<string, unknown> | null)?.maxPerHour as number | undefined ?? DEFAULTS.maxPerHour;
-  const maxDay = (config as Record<string, unknown> | null)?.maxPerDay as number | undefined ?? DEFAULTS.maxPerDay;
-  const data = load();
+  const maxHour = config?.maxPerHour ?? DEFAULTS.maxPerHour;
+  const maxDay = config?.maxPerDay ?? DEFAULTS.maxPerDay;
+  const data = await load();
   const now = Date.now();
 
   return {

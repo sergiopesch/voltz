@@ -1,120 +1,115 @@
-# Voltz
+<p align="center">
+  <img src="assets/voltz-logo.svg" alt="Voltz" width="400">
+</p>
 
-Voice-first AI companion for electronics and robotics enthusiasts. Speak questions, get spoken answers — hands-free while soldering.
+<p align="center">
+  <strong>Voice-first AI companion for electronics and robotics.</strong><br>
+  Speak questions, get spoken answers — hands-free while soldering.
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/platform-macOS-black?style=flat-square&logo=apple&logoColor=white" alt="macOS">
+  <img src="https://img.shields.io/badge/node-%3E%3D20-black?style=flat-square&logo=node.js&logoColor=white" alt="Node.js >=20">
+  <img src="https://img.shields.io/badge/license-MIT-E60000?style=flat-square" alt="MIT License">
+</p>
+
+---
 
 ```
 $ npm install -g voltz
-$ voltz setup          # paste API key, test mic/speaker
-$ voltz                # speak, get spoken answers
+$ voltz setup
+$ voltz
 ```
 
-## What it does
+## What It Does
 
 - **Voice mode** — speak a question, hear the answer through your speakers
 - **Chat mode** — text-based fallback when you can't use voice
 - **Vision mode** — point your webcam at a circuit and ask "what's wrong?"
-- **Electronics knowledge** — knows component specs, pinouts, formulas, and safety warnings
+- **Diagnostics** — `voltz doctor` validates your entire setup in seconds
+- **Electronics knowledge** — component specs, pinouts, formulas, safety warnings
 
 ## Requirements
 
-- macOS 14+ (uses native Speech Recognition and TTS)
+- macOS 14+
 - Node.js 20+
 - Anthropic API key
-- ffmpeg (optional, for webcam features): `brew install ffmpeg`
+- ffmpeg (optional, for webcam): `brew install ffmpeg`
 
 ## Usage
 
 ```bash
-voltz              # Voice mode (default) — speak and listen
-voltz chat         # Text chat mode
-voltz look         # Capture webcam + describe what you see
-voltz look "check my soldering"  # Webcam with custom prompt
-voltz setup        # Configure API key, test hardware
+voltz                          # Voice mode (default)
+voltz chat                     # Text chat
+voltz look                     # Webcam + vision analysis
+voltz look "check my solder"   # Webcam with custom prompt
+voltz setup                    # Configure API key, test hardware
+voltz doctor                   # Diagnostic checks
+voltz completions zsh          # Shell completions (bash/zsh/fish)
+voltz --verbose chat           # Debug logging
+voltz --quiet look             # Errors only
 ```
-
-## Architecture
-
-```
-voltz (TypeScript CLI — orchestrator)
- ├── State Machine      (pure-function voice loop transitions)
- ├── Engine Registry    (pluggable STT/TTS engines)
- ├── Swift binary       (mic → SFSpeechRecognizer → text)
- ├── say command        (text → macOS TTS → speaker)
- ├── ffmpeg             (webcam → frame capture)
- └── Claude Agent SDK   (LLM brain with streaming)
-```
-
-Single process, no Docker, no cloud services beyond the Anthropic API.
-
-### Reliability
-
-- **Retry with backoff** — 3 attempts with exponential delay (2s/4s), 45s budget cap
-- **Provider fallback** — Agent SDK fails → direct Anthropic API → error
-- **Rate limiting** — per-hour and per-day caps prevent runaway costs
-- **Secret redaction** — API keys and tokens are redacted in logs
-- **Agent tools** — Bash, Read, Glob, Grep, WebSearch, WebFetch for real problem-solving
-
-### Voice State Machine
-
-The voice loop is driven by a pure-function state machine — no ad-hoc state mutations. Phases, events, and transitions are declared; actions are returned as data and dispatched by the command. This makes the core loop testable and predictable.
-
-```
-IDLE → LISTENING → THINKING → SPEAKING → LISTENING (repeat)
-                 ↘ CAPTURING → THINKING    (webcam path)
-```
-
-### Engine Registry
-
-STT and TTS are pluggable via a self-registering engine registry. Default engines use native macOS APIs. Adding a new engine (e.g., Whisper, ElevenLabs) means implementing one interface and calling `registerSTT()` or `registerTTS()`.
 
 ## Configuration
 
-Settings live in `~/.voltz/config.json`. Personal overrides go in `~/.voltz/config.local.json` (field-by-field merge, local takes priority).
+Settings in `~/.voltz/config.json`. Personal overrides in `~/.voltz/config.local.json` (local wins).
 
 ```jsonc
-// ~/.voltz/config.json
 {
   "apiKey": "sk-ant-...",
+  "ttsVoice": "Samantha",
   "silenceTimeout": 1.5,
   "maxDuration": 30,
-  "ttsVoice": "Samantha",
   "logLevel": "info"
 }
 ```
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `apiKey` | — | Anthropic API key (or set `ANTHROPIC_API_KEY` env var) |
-| `sttEngine` | auto | STT engine name (`apple-speech`) |
-| `ttsEngine` | auto | TTS engine name (`apple-say`) |
+| `apiKey` | — | Anthropic API key (or `ANTHROPIC_API_KEY` env) |
+| `model` | `claude-sonnet-4-5-20250514` | Model ID |
+| `sttEngine` | auto | STT engine (`apple-speech`) |
+| `ttsEngine` | auto | TTS engine (`apple-say`) |
 | `ttsVoice` | `Samantha` | macOS TTS voice |
 | `silenceTimeout` | `1.5` | Seconds of silence before STT stops |
-| `maxDuration` | `30` | Max recording duration in seconds |
-| `logLevel` | `info` | Log level: `debug`, `info`, `warn`, `error` |
-| `maxPerHour` | `60` | Rate limit: max queries per hour |
-| `maxPerDay` | `500` | Rate limit: max queries per day |
-| `systemPromptAppend` | — | Custom text appended to the system prompt |
+| `maxDuration` | `30` | Max recording duration (seconds) |
+| `logLevel` | `info` | `debug` / `info` / `warn` / `error` |
+| `maxPerHour` | `60` | Rate limit: queries per hour |
+| `maxPerDay` | `500` | Rate limit: queries per day |
+| `dangerousTools` | `false` | Enable Bash tool for the agent |
+| `systemPromptAppend` | — | Custom text appended to system prompt |
+
+## Architecture
+
+```
+voltz (TypeScript CLI)
+ ├── Swift STT binary       mic → SFSpeechRecognizer → text
+ ├── macOS say              text → native TTS → speaker
+ ├── ffmpeg                 webcam → frame capture → base64
+ ├── Claude Agent SDK       LLM with tools, retry, fallback
+ └── Claude API             multimodal vision, streaming
+```
+
+Single process. No Docker. No cloud services beyond the Anthropic API.
+
+The voice loop runs as a pure-function state machine — transitions produce actions as data, a dispatcher handles side effects:
+
+```
+IDLE → LISTENING → THINKING → SPEAKING → LISTENING (repeat)
+                 ↘ CAPTURING → THINKING  (webcam path)
+```
+
+STT and TTS are pluggable via a self-registering engine registry. Defaults use native macOS APIs. Adding Whisper, Deepgram, or ElevenLabs means implementing one interface and calling `registerSTT()` or `registerTTS()`.
 
 ## Debugging
 
-Structured JSON logs are written to `~/.voltz/logs/voltz.log`:
-
 ```bash
-# View live logs
-tail -f ~/.voltz/logs/voltz.log | jq .
-
-# Filter voice events
-tail -f ~/.voltz/logs/voltz.log | jq 'select(.component == "voice")'
-
-# Show errors only
-tail -f ~/.voltz/logs/voltz.log | jq 'select(.level == "error")'
+voltz --verbose                                                    # debug-level logs
+tail -f ~/.voltz/logs/voltz.log | jq .                             # all logs
+tail -f ~/.voltz/logs/voltz.log | jq 'select(.level == "error")'   # errors only
 ```
 
-Enable verbose logging:
-```bash
-# In config
-{ "logLevel": "debug" }
-```
+`voltz doctor` runs a full diagnostic: API key, STT, TTS, ffmpeg, config, rate limits.
 
 ## Development
 
@@ -122,43 +117,10 @@ Enable verbose logging:
 git clone https://github.com/sergiopesch/voltz.git
 cd voltz
 npm install
-npm run build
-npm test     # Run tests
-npm run dev  # Run with hot reload (tsx)
-```
-
-### Project Structure
-
-```
-voltz/
-├── src/
-│   ├── index.ts                    # CLI entry + SilentError handling
-│   ├── config.ts                   # Two-tier config (base + local override)
-│   ├── logger.ts                   # Structured JSON logger (buffered I/O)
-│   ├── errors.ts                   # SilentError for clean CLI exits
-│   ├── commands/
-│   │   ├── voice.ts                # Voice loop (state machine dispatcher)
-│   │   ├── chat.ts                 # Text chat with streaming
-│   │   ├── look.ts                 # Webcam + vision analysis
-│   │   └── setup.ts               # First-time configuration wizard
-│   ├── rate-limit.ts               # Per-hour/per-day rate limiter
-│   ├── agent/
-│   │   ├── session.ts              # Agent SDK with retry, rate limiting, fallback
-│   │   ├── providers.ts            # Direct Anthropic + OpenAI-compatible fallback
-│   │   └── system-prompt.ts        # Electronics companion persona
-│   ├── voice/
-│   │   ├── state-machine.ts        # Pure-function state machine
-│   │   ├── registry.ts             # Pluggable STT/TTS engine registry
-│   │   ├── stt.ts                  # Apple Speech engine
-│   │   └── tts.ts                  # Apple say engine (sentence buffering)
-│   └── vision/
-│       └── capture.ts              # ffmpeg frame capture
-├── swift/
-│   └── Sources/VoltzSTT/main.swift # Native STT binary
-├── knowledge/
-│   └── electronics.md              # Component database (16 components)
-└── scripts/
-    └── build-stt.sh                # Swift binary compilation
+npm run build         # compile TypeScript
+npm test              # vitest
+npm run dev           # hot reload (tsx)
+npm run test:watch    # tests in watch mode
 ```
 
 ## License
