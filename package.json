@@ -1,0 +1,41 @@
+{
+  "name": "voltz",
+  "version": "0.1.0",
+  "description": "Voice-first AI companion for electronics enthusiasts",
+  "type": "module",
+  "bin": {
+    "voltz": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "postinstall": "bash scripts/build-stt.sh",
+    "format": "prettier --write 'src/**/*.ts'"
+  },
+  "engines": {
+    "node": ">=20",
+    "os": "darwin"
+  },
+  "keywords": [
+    "electronics",
+    "voice",
+    "ai",
+    "claude",
+    "robotics",
+    "iot"
+  ],
+  "author": "sergiopesch",
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.63",
+    "chalk": "^5.4.1",
+    "commander": "^13.1.0",
+    "ora": "^8.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "prettier": "^3.5.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

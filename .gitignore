@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.build/
+.swiftpm/
+swift/.build/
+*.js.map
+*.d.ts
+!src/**/*.d.ts
+.DS_Store
