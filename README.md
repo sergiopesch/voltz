@@ -9,6 +9,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/platform-macOS-black?style=flat-square&logo=apple&logoColor=white" alt="macOS">
+  <img src="https://img.shields.io/badge/platform-linux-black?style=flat-square&logo=linux&logoColor=white" alt="Linux">
   <img src="https://img.shields.io/badge/node-%3E%3D20-black?style=flat-square&logo=node.js&logoColor=white" alt="Node.js >=20">
   <img src="https://img.shields.io/badge/license-MIT-E60000?style=flat-square" alt="MIT License">
 </p>
@@ -31,10 +32,37 @@ $ voltz
 
 ## Requirements
 
-- macOS 14+
+- macOS 14+ or modern Linux
 - Node.js 20+
-- Anthropic API key
-- ffmpeg (optional, for webcam): `brew install ffmpeg`
+- API key for a supported model provider
+- ffmpeg (optional, for webcam and some Linux backends)
+- On Linux, `espeak-ng` or `espeak` for TTS
+- On Linux STT, `whisper-cli` plus a local model file
+
+## Model Providers
+
+Voltz is provider-neutral at the app layer.
+
+- `anthropic` uses the Claude Agent SDK for tool-enabled text chat and Anthropic Messages for direct multimodal streaming
+- `openai-compatible` works with OpenAI, OpenRouter, Ollama, local gateways, and other compatible `/chat/completions` APIs, with local workspace-scoped tool execution and persisted session history
+
+The selected provider controls credential lookup, connectivity checks, and the default model.
+
+## Philosophy
+
+Voltz should stay small in the center and powerful at the edges.
+
+- Prefer a few explicit primitives over layered framework code
+- Keep session state serializable and local when possible
+- Push provider-specific behavior into adapters instead of the command layer
+- Prefer OS tools and simple processes over hidden daemons
+- Add capability by composing small parts, not by growing a giant core
+
+## Platform Notes
+
+- macOS currently has the most complete voice stack: native Apple STT, native `say` TTS, and `avfoundation` webcam capture
+- Linux now supports `espeak`-based TTS, `video4linux2` webcam capture, and `whisper-cli`-based STT
+- Linux STT is not yet at macOS parity, so `chat` and `look` are the most reliable Linux entry points today
 
 ## Usage
 
@@ -56,7 +84,12 @@ Settings in `~/.voltz/config.json`. Personal overrides in `~/.voltz/config.local
 
 ```jsonc
 {
+  "provider": "anthropic",
   "apiKey": "sk-ant-...",
+  "model": "claude-sonnet-4-5-20250514",
+  "sttModelPath": "/home/you/.cache/whisper.cpp/ggml-base.en.bin",
+  "micDevice": "pulse:default",
+  "sttLanguage": "en",
   "ttsVoice": "Samantha",
   "silenceTimeout": 1.5,
   "maxDuration": 30,
@@ -66,9 +99,14 @@ Settings in `~/.voltz/config.json`. Personal overrides in `~/.voltz/config.local
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `apiKey` | — | Anthropic API key (or `ANTHROPIC_API_KEY` env) |
-| `model` | `claude-sonnet-4-5-20250514` | Model ID |
+| `provider` | `anthropic` | LLM provider: `anthropic` or `openai-compatible` |
+| `apiKey` | — | Provider API key. Env overrides: `VOLTZ_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` |
+| `model` | provider-specific | Model ID for the selected provider |
+| `baseURL` | `https://api.openai.com/v1` | Base URL for `openai-compatible` providers. Env overrides: `VOLTZ_BASE_URL`, `OPENAI_BASE_URL` |
 | `sttEngine` | auto | STT engine (`apple-speech`) |
+| `sttModelPath` | — | Linux/local STT model path. Env override: `VOLTZ_STT_MODEL` |
+| `micDevice` | auto | Optional Linux mic override such as `pulse:default` or `alsa:hw:1,0`. Env override: `VOLTZ_MIC_DEVICE` |
+| `sttLanguage` | auto | Preferred STT language code such as `en` |
 | `ttsEngine` | auto | TTS engine (`apple-say`) |
 | `ttsVoice` | `Samantha` | macOS TTS voice |
 | `silenceTimeout` | `1.5` | Seconds of silence before STT stops |
@@ -83,14 +121,13 @@ Settings in `~/.voltz/config.json`. Personal overrides in `~/.voltz/config.local
 
 ```
 voltz (TypeScript CLI)
- ├── Swift STT binary       mic → SFSpeechRecognizer → text
- ├── macOS say              text → native TTS → speaker
- ├── ffmpeg                 webcam → frame capture → base64
- ├── Claude Agent SDK       LLM with tools, retry, fallback
- └── Claude API             multimodal vision, streaming
+ ├── STT backends           Apple Speech today, more platform engines over time
+ ├── TTS backends           macOS `say`, Linux `espeak`
+ ├── ffmpeg + platform IO   webcam capture and media utilities
+ └── Provider adapters      model routing, tools, sessions, vision, diagnostics
 ```
 
-Single process. No Docker. No cloud services beyond the Anthropic API.
+Single process. No Docker. No cloud services beyond the selected model provider.
 
 The voice loop runs as a pure-function state machine — transitions produce actions as data, a dispatcher handles side effects:
 
@@ -99,7 +136,9 @@ IDLE → LISTENING → THINKING → SPEAKING → LISTENING (repeat)
                  ↘ CAPTURING → THINKING  (webcam path)
 ```
 
-STT and TTS are pluggable via a self-registering engine registry. Defaults use native macOS APIs. Adding Whisper, Deepgram, or ElevenLabs means implementing one interface and calling `registerSTT()` or `registerTTS()`.
+STT and TTS are pluggable via a self-registering engine registry. macOS uses native Apple APIs; Linux currently uses `espeak` for TTS, `whisper-cli` for STT, and v4l2 for webcam capture. Adding Whisper, Deepgram, or ElevenLabs still means implementing one interface and calling `registerSTT()` or `registerTTS()`.
+
+LLM providers are also adapter-based. Anthropic remains supported, but the core session flow now targets a provider interface instead of one SDK. OpenAI-compatible providers now keep local conversation state and can execute local workspace tools in text sessions, which keeps the agent loop generic instead of vendor-shaped.
 
 ## Debugging
 

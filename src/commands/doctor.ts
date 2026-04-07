@@ -1,25 +1,30 @@
 import { existsSync, statSync } from "node:fs";
-import { spawn } from "node:child_process";
 import chalk from "chalk";
 import ora from "ora";
-import { loadConfig, STT_BINARY, VOLTZ_DIR, VoltzConfigSchema } from "../config.js";
+import {
+  getProviderEnvHints,
+  getProviderLabel,
+  getProviderSettings,
+  loadConfig,
+  STT_BINARY,
+  VOLTZ_DIR,
+  VoltzConfigSchema,
+} from "../config.js";
 import { getRateLimitStatus } from "../rate-limit.js";
 import { logger } from "../logger.js";
-// Trigger engine self-registration
-import "../voice/stt.js";
+import { createProviderAdapter } from "../agent/providers.js";
+import {
+  formatLinuxSTTSetupHint,
+  getLinuxSTTDiagnostics,
+  isFFmpegAvailable,
+} from "../voice/stt.js";
 import "../voice/tts.js";
-import { listSTTEngines, listTTSEngines } from "../voice/registry.js";
-
-function runCommand(cmd: string, args: string[]): Promise<boolean> {
-  return new Promise((resolve) => {
-    const proc = spawn(cmd, args, {
-      stdio: "ignore",
-      signal: AbortSignal.timeout(10_000),
-    });
-    proc.on("close", (code) => resolve(code === 0));
-    proc.on("error", () => resolve(false));
-  });
-}
+import {
+  detectSTT,
+  detectTTS,
+  listSTTEngines,
+  listTTSEngines,
+} from "../voice/registry.js";
 
 export async function doctorCommand(): Promise<void> {
   console.log(chalk.bold("\nVoltz Doctor\n"));
@@ -27,10 +32,24 @@ export async function doctorCommand(): Promise<void> {
 
   // 1. API key present and valid format
   const config = loadConfig();
-  const apiKey = config?.apiKey ?? process.env.ANTHROPIC_API_KEY ?? "";
+  const providerSettings = getProviderSettings(config);
+  const apiKey = providerSettings.apiKey ?? "";
+  console.log(
+    chalk.dim(
+      `Provider: ${getProviderLabel(providerSettings.provider)} (${providerSettings.model})`
+    )
+  );
+  if (providerSettings.baseURL) {
+    console.log(chalk.dim(`Base URL: ${providerSettings.baseURL}`));
+  }
+
   const keySpinner = ora("Checking API key...").start();
   if (!apiKey) {
-    keySpinner.fail(chalk.red("No API key found"));
+    keySpinner.fail(
+      chalk.red(
+        `No API key found. Expected ${getProviderEnvHints(providerSettings.provider).join(" or ")}`
+      )
+    );
     allOk = false;
   } else if (!apiKey.startsWith("sk-")) {
     keySpinner.warn(chalk.yellow(`API key present but unusual format (doesn't start with 'sk-')`));
@@ -42,14 +61,14 @@ export async function doctorCommand(): Promise<void> {
   if (apiKey) {
     const testSpinner = ora("Testing API connectivity...").start();
     try {
-      const { default: Anthropic } = await import("@anthropic-ai/sdk");
-      const client = new Anthropic({ apiKey });
-      await client.messages.create({
-        model: "claude-haiku-4-5-20241022",
-        max_tokens: 1,
-        messages: [{ role: "user", content: "hi" }],
+      const adapter = createProviderAdapter({
+        ...providerSettings,
+        apiKey,
       });
-      testSpinner.succeed(chalk.green("API key works"));
+      await adapter.testConnection();
+      testSpinner.succeed(
+        chalk.green(`${getProviderLabel(providerSettings.provider)} connection works`)
+      );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       testSpinner.fail(chalk.red(`API test failed: ${msg.slice(0, 100)}`));
@@ -59,26 +78,53 @@ export async function doctorCommand(): Promise<void> {
 
   // 3. STT binary
   const sttSpinner = ora("Checking STT binary...").start();
-  if (existsSync(STT_BINARY)) {
+  const sttEngine = await detectSTT();
+  if (sttEngine) {
+    sttSpinner.succeed(chalk.green(`STT available via ${sttEngine.name}`));
+  } else if (process.platform === "darwin" && existsSync(STT_BINARY)) {
     sttSpinner.succeed(chalk.green("STT binary found"));
+  } else if (process.platform === "linux") {
+    const diagnostics = getLinuxSTTDiagnostics(config);
+    sttSpinner.warn(chalk.yellow(formatLinuxSTTSetupHint(diagnostics)));
+    console.log(
+      chalk.dim(`  ffmpeg: ${diagnostics.ffmpegAvailable ? "ok" : "missing"}`)
+    );
+    console.log(
+      chalk.dim(
+        `  whisper-cli: ${diagnostics.whisperBinary ?? "missing"}`
+      )
+    );
+    console.log(
+      chalk.dim(
+        `  model: ${diagnostics.modelPath ?? "missing"}`
+      )
+    );
+    console.log(
+      chalk.dim(
+        `  mic inputs: ${diagnostics.backends
+          .map((backend) => `${backend.format}:${backend.device}`)
+          .join(", ")}`
+      )
+    );
+    allOk = false;
   } else {
-    sttSpinner.warn(chalk.yellow("STT binary not found. Run: npm run postinstall"));
+    sttSpinner.warn(chalk.yellow("No STT engine detected"));
     allOk = false;
   }
 
-  // 4. TTS say command
+  // 4. TTS
   const ttsSpinner = ora("Checking TTS...").start();
-  const ttsOk = await runCommand("say", ["-v", "?"]);
-  if (ttsOk) {
-    ttsSpinner.succeed(chalk.green("TTS (say) available"));
+  const ttsEngine = await detectTTS();
+  if (ttsEngine) {
+    ttsSpinner.succeed(chalk.green(`TTS available via ${ttsEngine.name}`));
   } else {
-    ttsSpinner.fail(chalk.red("TTS (say) not available"));
+    ttsSpinner.fail(chalk.red("No TTS engine available"));
     allOk = false;
   }
 
   // 5. ffmpeg
   const ffmpegSpinner = ora("Checking ffmpeg...").start();
-  const ffmpegOk = await runCommand("ffmpeg", ["-version"]);
+  const ffmpegOk = isFFmpegAvailable();
   if (ffmpegOk) {
     ffmpegSpinner.succeed(chalk.green("ffmpeg available"));
   } else {

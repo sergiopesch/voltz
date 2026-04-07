@@ -15,7 +15,6 @@ import {
   type Phase,
   type Event,
   type Action,
-  type Context,
 } from "../voice/state-machine.js";
 
 export async function voiceCommand(): Promise<void> {

@@ -1,9 +1,12 @@
-import { query } from "@anthropic-ai/claude-agent-sdk";
-import { loadSessionId, saveSessionId, loadConfig } from "../config.js";
-import { getSystemPrompt } from "./system-prompt.js";
+import {
+  loadSessionState,
+  saveSessionState,
+  loadConfig,
+  resolveProviderConfig,
+} from "../config.js";
 import { logger } from "../logger.js";
 import { checkRateLimit } from "../rate-limit.js";
-import { streamAnthropicDirect } from "./providers.js";
+import { createProviderAdapter } from "./providers.js";
 
 export interface AgentResponse {
   text: string;
@@ -60,7 +63,12 @@ export async function* streamQuery(
     return;
   }
 
-  const previousSessionId = loadSessionId();
+  const providerConfig = resolveProviderConfig();
+  const provider = providerConfig.provider;
+  const adapter = createProviderAdapter(providerConfig);
+  const previousState = adapter.capabilities.sessionResume
+    ? loadSessionState(provider)
+    : null;
   let fullPrompt: string;
   if (options?.imageBase64) {
     fullPrompt =
@@ -69,26 +77,12 @@ export async function* streamQuery(
     fullPrompt = prompt;
   }
 
-  // Vision queries go directly to Anthropic API (Agent SDK doesn't support images)
-  if (options?.imageBase64) {
-    logger.info("session", "vision-direct-api", { promptLength: fullPrompt.length });
-    try {
-      for await (const chunk of streamAnthropicDirect(fullPrompt, { imageBase64: options.imageBase64 })) {
-        if (chunk.type === "text") {
-          yield { type: "text", text: chunk.text };
-        }
-      }
-      yield { type: "done", sessionId: previousSessionId ?? "" };
-      return;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.error("session", "vision-failed", { error: msg });
-      throw err;
-    }
+  if (options?.imageBase64 && !adapter.capabilities.vision) {
+    throw new Error(`Provider ${provider} does not support vision input.`);
   }
 
-  let sessionId = previousSessionId ?? undefined;
-  let resultText = "";
+  let sessionId = previousState?.sessionId;
+  let nextState = previousState ?? undefined;
   let lastError: unknown;
   const startTime = Date.now();
 
@@ -110,43 +104,27 @@ export async function* streamQuery(
     }
 
     try {
-      resultText = "";
+      let resultText = "";
 
-      for await (const message of query({
+      for await (const chunk of adapter.stream({
         prompt: fullPrompt,
-        options: {
-          systemPrompt: getSystemPrompt(),
-          resume: sessionId,
-          allowedTools: getAllowedTools(),
-          permissionMode: "bypassPermissions" as const,
-          allowDangerouslySkipPermissions: true,
-        },
+        imageBase64: options?.imageBase64,
+        resumeSessionId: sessionId,
+        resumeState: nextState ?? previousState,
+        allowedTools: adapter.capabilities.toolUse ? getAllowedTools() : [],
+        dangerousTools: !!loadConfig()?.dangerousTools,
       })) {
-        if (message.type === "system" && message.subtype === "init") {
-          sessionId = message.session_id;
-        }
-
-        if (message.type === "assistant" && "message" in message) {
-          const content = (
-            message as {
-              message: {
-                content: Array<{ type: string; text?: string }>;
-              };
-            }
-          ).message.content;
-          for (const block of content) {
-            if (block.type === "text" && block.text) {
-              yield { type: "text", text: block.text };
-              resultText += block.text;
-            }
+        if (chunk.type === "session") {
+          sessionId = chunk.sessionId;
+          nextState = { ...(nextState ?? {}), sessionId: chunk.sessionId };
+        } else if (chunk.type === "state") {
+          nextState = chunk.state;
+          if (chunk.state.sessionId) {
+            sessionId = chunk.state.sessionId;
           }
-        }
-
-        if (message.type === "result") {
-          const result = (message as { result?: string }).result;
-          if (result && !resultText) {
-            yield { type: "text", text: result };
-          }
+        } else if (chunk.type === "text") {
+          yield { type: "text", text: chunk.text };
+          resultText += chunk.text;
         }
       }
 
@@ -156,38 +134,25 @@ export async function* streamQuery(
         attempt,
         elapsed,
         resultLength: resultText.length,
+        provider,
       });
 
-      if (sessionId) {
-        saveSessionId(sessionId);
-        yield { type: "done", sessionId };
+      if (nextState) {
+        saveSessionState(nextState, provider);
+        yield { type: "done", sessionId: sessionId ?? "" };
+      } else {
+        yield { type: "done", sessionId: "" };
       }
       return;
     } catch (err) {
       lastError = err;
       const msg = err instanceof Error ? err.message : String(err);
-      logger.error("session", "query-error", { attempt, error: msg });
+      logger.error("session", "query-error", { attempt, error: msg, provider });
 
       if (!isRetryable(err) || attempt === MAX_RETRIES - 1) {
         break;
       }
     }
-  }
-
-  // All retries exhausted with Agent SDK — try direct Anthropic API fallback
-  logger.warn("session", "falling-back-to-direct-api");
-  try {
-    for await (const chunk of streamAnthropicDirect(fullPrompt)) {
-      if (chunk.type === "text") {
-        yield { type: "text", text: chunk.text };
-      }
-    }
-    yield { type: "done", sessionId: sessionId ?? "" };
-    return;
-  } catch (fallbackErr) {
-    const fbMsg =
-      fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
-    logger.error("session", "fallback-failed", { error: fbMsg });
   }
 
   // Everything failed — throw the original error

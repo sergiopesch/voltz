@@ -5,22 +5,12 @@ import { tmpdir } from "node:os";
 
 export async function captureFrame(): Promise<Buffer> {
   const outputPath = join(tmpdir(), `voltz-capture-${Date.now()}.jpg`);
+  const ffmpegArgs = getCaptureArgs(outputPath);
 
   return new Promise((resolve, reject) => {
     const proc = spawn(
       "ffmpeg",
-      [
-        "-f",
-        "avfoundation",
-        "-framerate",
-        "30",
-        "-i",
-        "0",
-        "-frames:v",
-        "1",
-        "-y",
-        outputPath,
-      ],
+      ffmpegArgs,
       { stdio: ["ignore", "pipe", "pipe"], signal: AbortSignal.timeout(15_000) }
     );
 
@@ -47,9 +37,43 @@ export async function captureFrame(): Promise<Buffer> {
     proc.on("error", (err) => {
       reject(
         new Error(
-          `ffmpeg not found. Install with: brew install ffmpeg\n${err.message}`
+          `ffmpeg not found. Install ffmpeg first.\n${err.message}`
         )
       );
     });
   });
+}
+
+function getCaptureArgs(outputPath: string): string[] {
+  if (process.platform === "darwin") {
+    return [
+      "-f",
+      "avfoundation",
+      "-framerate",
+      "30",
+      "-i",
+      process.env.VOLTZ_CAMERA_DEVICE ?? "0",
+      "-frames:v",
+      "1",
+      "-y",
+      outputPath,
+    ];
+  }
+
+  if (process.platform === "linux") {
+    return [
+      "-f",
+      "video4linux2",
+      "-framerate",
+      "30",
+      "-i",
+      process.env.VOLTZ_CAMERA_DEVICE ?? "/dev/video0",
+      "-frames:v",
+      "1",
+      "-y",
+      outputPath,
+    ];
+  }
+
+  throw new Error(`Webcam capture is not supported on ${process.platform}`);
 }

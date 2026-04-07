@@ -1,7 +1,7 @@
 {
   "name": "voltz",
   "version": "0.1.0",
-  "description": "Voice-first AI companion for electronics enthusiasts. Speak questions, get spoken answers.",
+  "description": "Voice-first AI companion for electronics enthusiasts with pluggable model providers.",
   "type": "module",
   "homepage": "https://github.com/sergiopesch/voltz",
   "repository": {
@@ -23,21 +23,22 @@
     "test:watch": "vitest"
   },
   "engines": {
-    "node": ">=20",
-    "os": "darwin"
+    "node": ">=20"
   },
   "keywords": [
     "electronics",
     "voice",
     "ai",
-    "claude",
+    "llm",
     "robotics",
     "iot",
     "cli",
     "speech",
     "tts",
     "stt",
-    "vision"
+    "vision",
+    "openai",
+    "anthropic"
   ],
   "author": "sergiopesch",
   "license": "MIT",

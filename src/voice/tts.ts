@@ -1,10 +1,16 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { registerTTS, type TTSEngine } from "./registry.js";
 import { loadConfig } from "../config.js";
 
-const SENTENCE_ENDINGS = /(?<=[.!?])\s+/;
+export const SENTENCE_ENDINGS = /(?<=[.!?])\s+/;
+const ESPEAK_BINARIES = ["espeak-ng", "espeak"] as const;
 
-function stripMarkdown(text: string): string {
+interface SpeechCommand {
+  cmd: string;
+  args: string[];
+}
+
+export function stripMarkdown(text: string): string {
   return (
     text
       // Code blocks
@@ -35,11 +41,11 @@ export class TTS {
   private currentProcess: ChildProcess | null = null;
   private speaking = false;
   private queue: string[] = [];
-  private voice: string;
   private flushResolve: (() => void) | null = null;
+  private readonly buildCommand: (text: string) => SpeechCommand;
 
-  constructor(voice = "Samantha") {
-    this.voice = voice;
+  constructor(buildCommand: (text: string) => SpeechCommand) {
+    this.buildCommand = buildCommand;
   }
 
   feedText(chunk: string): void {
@@ -109,7 +115,9 @@ export class TTS {
       return;
     }
 
-    this.currentProcess = spawn("say", ["-v", this.voice, cleaned], {
+    const command = this.buildCommand(cleaned);
+
+    this.currentProcess = spawn(command.cmd, command.args, {
       stdio: "ignore",
       signal: AbortSignal.timeout(30_000),
     });
@@ -134,7 +142,10 @@ class AppleTTSEngine implements TTSEngine {
 
   constructor() {
     const config = loadConfig();
-    this.tts = new TTS(config?.ttsVoice ?? "Samantha");
+    this.tts = new TTS((text) => ({
+      cmd: "say",
+      args: ["-v", config?.ttsVoice ?? "Samantha", text],
+    }));
   }
 
   async isAvailable(): Promise<boolean> {
@@ -155,3 +166,47 @@ class AppleTTSEngine implements TTSEngine {
 }
 
 registerTTS("apple-say", () => new AppleTTSEngine());
+
+class LinuxTTSEngine implements TTSEngine {
+  readonly name = "linux-espeak";
+  private readonly binary = findEspeakBinary();
+  private readonly tts: TTS;
+
+  constructor() {
+    const config = loadConfig();
+    const voice = config?.ttsVoice ?? "en";
+    const binary = this.binary ?? "espeak";
+    this.tts = new TTS((text) => ({
+      cmd: binary,
+      args: ["-v", voice, text],
+    }));
+  }
+
+  async isAvailable(): Promise<boolean> {
+    return process.platform === "linux" && this.binary !== null;
+  }
+
+  feedText(chunk: string): void {
+    this.tts.feedText(chunk);
+  }
+
+  flush(): Promise<void> {
+    return this.tts.flush();
+  }
+
+  stop(): void {
+    this.tts.stopSpeaking();
+  }
+}
+
+registerTTS("linux-espeak", () => new LinuxTTSEngine());
+
+function findEspeakBinary(): string | null {
+  for (const candidate of ESPEAK_BINARIES) {
+    const result = spawnSync(candidate, ["--version"], { stdio: "ignore" });
+    if (!result.error) {
+      return candidate;
+    }
+  }
+  return null;
+}

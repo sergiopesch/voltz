@@ -1,5 +1,5 @@
 import { readFileSync, existsSync } from "node:fs";
-import { KNOWLEDGE_PATH } from "../config.js";
+import { KNOWLEDGE_PATH, loadConfig } from "../config.js";
 
 let cachedKnowledge: string | undefined;
 
@@ -10,6 +10,7 @@ export function getSystemPrompt(): string {
       : "";
   }
   const knowledge = cachedKnowledge;
+  const appended = loadConfig()?.systemPromptAppend?.trim();
 
   return `You are Voltz, a voice-first AI companion for electronics and robotics enthusiasts.
 
@@ -45,5 +46,5 @@ Use tools when the user asks you to look something up or check a datasheet. For 
 ## Vision
 When the user shares an image, describe what you see on their workbench and offer relevant advice. Identify components, wiring issues, or suggest next steps.
 
-${knowledge ? `## Component Reference\n\n${knowledge}` : ""}`;
+${knowledge ? `## Component Reference\n\n${knowledge}` : ""}${appended ? `\n\n## Additional Instructions\n${appended}` : ""}`;
 }
