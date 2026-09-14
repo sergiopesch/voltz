@@ -2,7 +2,7 @@
 
 import { Command } from "commander";
 import { createRequire } from "node:module";
-import _sun from "simple-update-notifier";
+import simpleUpdateNotifier from "simple-update-notifier";
 import { voiceCommand } from "./commands/voice.js";
 import { chatCommand } from "./commands/chat.js";
 import { lookCommand } from "./commands/look.js";
@@ -12,9 +12,6 @@ import { completionsCommand } from "./commands/completions.js";
 import { isSilentError } from "./errors.js";
 import { logger, setLevel } from "./logger.js";
 import { loadConfig } from "./config.js";
-
-// CJS default export interop for simple-update-notifier
-const simpleUpdateNotifier = (_sun as unknown as { default: (args: { pkg: { name: string; version: string }; distTag?: string }) => Promise<void> }).default;
 
 // Apply log level from config
 const config = loadConfig();
