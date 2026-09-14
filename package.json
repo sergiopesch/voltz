@@ -53,11 +53,11 @@
   },
   "devDependencies": {
     "@types/node": "^22.13.0",
-    "@vitest/coverage-v8": "^4.0.18",
+    "@vitest/coverage-v8": "^4.1.11",
     "prettier": "^3.5.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
-    "vitest": "^4.0.18"
+    "vitest": "^4.1.11"
   },
   "overrides": {
     "vite": "7.3.2",
