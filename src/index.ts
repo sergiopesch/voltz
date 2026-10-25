@@ -2,7 +2,6 @@
 
 import { Command } from "commander";
 import { createRequire } from "node:module";
-import simpleUpdateNotifier from "simple-update-notifier";
 import { voiceCommand } from "./commands/voice.js";
 import { chatCommand } from "./commands/chat.js";
 import { lookCommand } from "./commands/look.js";
@@ -22,6 +21,11 @@ if (config?.logLevel) {
 // Check for updates (throttled internally to once per day)
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json") as { name: string; version: string };
+// The notifier is CommonJS; load its callable module.exports through require.
+const simpleUpdateNotifier = require("simple-update-notifier") as (options: {
+  pkg: typeof pkg;
+  distTag: string;
+}) => Promise<void>;
 simpleUpdateNotifier({ pkg, distTag: "latest" }).catch(() => {});
 
 const program = new Command();
