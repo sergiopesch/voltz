@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { readFile, readdir, stat } from "node:fs/promises";
-import { resolve, relative, sep } from "node:path";
+import { readFile, readdir, stat, realpath } from "node:fs/promises";
+import { resolve, relative, sep, isAbsolute } from "node:path";
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_LIMIT = 50;
@@ -200,7 +200,7 @@ async function runReadFile(
   const rawPath = typeof args.path === "string" ? args.path : "";
   if (!rawPath) return "Missing required argument: path";
 
-  const targetPath = resolveWorkspacePath(context.cwd, rawPath);
+  const targetPath = await resolveWorkspacePath(context.cwd, rawPath);
   if (!targetPath) return "Path must stay within the current workspace.";
 
   const maxBytes = toInt(args.maxBytes, DEFAULT_MAX_BYTES, 256, 200_000);
@@ -256,7 +256,7 @@ async function runGrepFiles(
 
   const root =
     typeof args.path === "string"
-      ? resolveWorkspacePath(context.cwd, args.path)
+      ? await resolveWorkspacePath(context.cwd, args.path)
       : context.cwd;
   if (!root) {
     return "Path must stay within the current workspace.";
@@ -407,16 +407,21 @@ function isToolAllowed(name: string, context: ToolRuntimeContext): boolean {
   return tool.aliases.some((alias) => allowed.has(alias));
 }
 
-function resolveWorkspacePath(cwd: string, inputPath: string): string | null {
-  const workspaceRoot = resolve(cwd);
-  const targetPath = resolve(workspaceRoot, inputPath);
-  const targetRelative = relative(workspaceRoot, targetPath);
+async function resolveWorkspacePath(cwd: string, inputPath: string): Promise<string | null> {
+  try {
+    const workspaceRoot = await realpath(resolve(cwd));
+    const targetPath = await realpath(resolve(workspaceRoot, inputPath));
+    const targetRelative = relative(workspaceRoot, targetPath);
 
-  if (
-    targetRelative === "" ||
-    (!targetRelative.startsWith("..") && targetRelative !== "..")
-  ) {
-    return targetPath;
+    if (
+      !isAbsolute(targetRelative) &&
+      targetRelative !== ".." &&
+      !targetRelative.startsWith(`..${sep}`)
+    ) {
+      return targetPath;
+    }
+  } catch {
+    // Missing or inaccessible paths cannot establish workspace containment.
   }
 
   return null;
